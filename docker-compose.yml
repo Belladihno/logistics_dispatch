@@ -1,0 +1,25 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: logistics-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command:
+      [
+        "sh",
+        "-c",
+        "redis-server --appendonly yes --save 60 1000 --protected-mode yes --requirepass \"$REDIS_PASSWORD\"",
+      ]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "$$REDIS_PASSWORD", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis_data:
