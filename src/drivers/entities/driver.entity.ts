@@ -3,16 +3,27 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToOne,
   PrimaryColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 import { v7 as uuidv7 } from 'uuid';
 import { User } from '../../users/entities/user.entity';
-import { VehicleType } from '../enums/vehncle-type.enum';
+import { VehicleType } from '../enums/vehincle-type.enum';
 
 @Entity('drivers')
+@Index('idx_drivers_user_id', ['userId'])
+@Index('idx_drivers_online_status', ['onlineStatus'])
+@Index('idx_drivers_is_suspended', ['isSuspended'])
+@Index('idx_drivers_dispatch', [
+  'onlineStatus',
+  'isSuspended',
+  'currentLatitude',
+  'currentLongitude',
+])
 export class Driver {
   @PrimaryColumn('uuid')
   id!: string;
@@ -76,6 +87,9 @@ export class Driver {
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt!: Date;
 
   @BeforeInsert()
   private beforeInsert(): void {

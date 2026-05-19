@@ -16,6 +16,7 @@ import {
   getClientTracker,
 } from './common/throttler/throttle-key.util';
 import { throttleConfig } from './common/throttler/throttle.config';
+import { OrdersModule } from './orders/orders.module';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { throttleConfig } from './common/throttler/throttle.config';
     MailModule,
     AuthModule,
     UsersModule,
+    OrdersModule,
   ],
 
   controllers: [AppController],

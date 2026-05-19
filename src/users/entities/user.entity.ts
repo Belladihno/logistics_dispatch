@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   PrimaryColumn,
   UpdateDateColumn,
 } from 'typeorm';
@@ -12,6 +13,9 @@ import { UserRole } from '../enums/user-role.enum';
 import { AuthProvider } from '../../auth/enums/auth-provider';
 
 @Entity('users')
+@Index('idx_users_role', ['role'])
+@Index('idx_users_google_id', ['googleId'])
+@Index('idx_users_email_provider', ['email', 'provider'])
 export class User {
   @PrimaryColumn('uuid')
   id!: string;
