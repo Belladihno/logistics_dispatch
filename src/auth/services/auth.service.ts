@@ -21,6 +21,7 @@ import { ConfigService } from '@nestjs/config';
 import { MailService } from 'src/mail/mail.service';
 import { ResendVerificationEmailDto } from '../dto/resend-verification-email.dto';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
+import { UsersService } from 'src/users/users.service';
 
 export interface AuthResponse {
   user: Partial<User>;
@@ -36,7 +37,8 @@ export class AuthService {
   private readonly PASSWORD_RESET_TTL_MS = 1000 * 60 * 10;
 
   constructor(
-    private tokenService: TokenService,
+    private readonly tokenService: TokenService,
+    private readonly usersService: UsersService,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
@@ -45,7 +47,7 @@ export class AuthService {
   async register(dto: RegisterDto): Promise<AuthResponse> {
     const email = dto.email.toLowerCase().trim();
 
-    const existingUser = await this.userRepo.findOneBy({ email });
+    const existingUser = await this.usersService.findByEmail(email);
 
     if (existingUser) {
       throw new ConflictException('Email already in use');
@@ -131,9 +133,9 @@ export class AuthService {
     });
 
     if (!user) {
-      const existingUserByEmail = await this.userRepo.findOneBy({
-        email: googleUser.email.toLowerCase().trim(),
-      });
+      const existingUserByEmail = await this.usersService.findByEmail(
+        googleUser.email,
+      );
 
       if (
         existingUserByEmail &&
@@ -251,9 +253,7 @@ export class AuthService {
     const genericResponseMessage =
       'If an account exists for this email, a verification email has been sent.';
 
-    const user = await this.userRepo.findOneBy({
-      email: normalizedEmail,
-    });
+    const user = await this.usersService.findByEmail(normalizedEmail);
 
     if (!user || user.isEmailVerified) {
       return { message: genericResponseMessage };
@@ -278,9 +278,7 @@ export class AuthService {
   }
 
   async refreshTokens(user: JwtUser): Promise<AuthResponse> {
-    const dbUser = await this.userRepo.findOneBy({
-      id: user.userId,
-    });
+    const dbUser = await this.usersService.findById(user.userId);
 
     if (!dbUser) {
       throw new UnauthorizedException('User no longer exists');
@@ -299,13 +297,16 @@ export class AuthService {
     };
   }
 
+  async logout(user: JwtUser): Promise<{ message: string }> {
+    await this.tokenService.revokeRefreshToken(user.userId);
+    return { message: 'Logged out successfully' };
+  }
+
   async forgotPassword(dto: ForgotPasswordDto): Promise<string> {
     const genericResponseMessage =
       'If an account exists for this email, a password reset email has been sent.';
 
-    const user = await this.userRepo.findOneBy({
-      email: dto.email,
-    });
+    const user = await this.usersService.findByEmail(dto.email);
 
     if (!user || user.provider !== AuthProvider.LOCAL) {
       return genericResponseMessage;

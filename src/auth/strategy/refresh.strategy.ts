@@ -46,10 +46,16 @@ export class RefreshStrategy extends PassportStrategy(Strategy, 'refresh') {
     if (!user.isEmailVerified)
       throw new UnauthorizedException('Please verify your email first');
 
+    const driverProfileId = await this.tokenService.resolveDriverProfileId(
+      user.id,
+      user.role,
+    );
+
     return {
       userId: user.id,
       email: user.email,
       role: user.role,
+      driverProfileId,
     };
   }
 }

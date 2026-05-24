@@ -12,7 +12,7 @@ import {
 } from 'typeorm';
 import { v7 as uuidv7 } from 'uuid';
 import { User } from '../../users/entities/user.entity';
-import { VehicleType } from '../enums/vehincle-type.enum';
+import { VehincleType } from '../enums/vehincle-type.enum';
 
 @Entity('drivers')
 @Index('idx_drivers_user_id', ['userId'])
@@ -21,6 +21,7 @@ import { VehicleType } from '../enums/vehincle-type.enum';
 @Index('idx_drivers_dispatch', [
   'onlineStatus',
   'isSuspended',
+  'vehincleType',
   'currentLatitude',
   'currentLongitude',
 ])
@@ -38,9 +39,9 @@ export class Driver {
   @Column({
     name: 'vehincle_type',
     type: 'enum',
-    enum: VehicleType,
+    enum: VehincleType,
   })
-  vehincleType!: VehicleType;
+  vehincleType!: VehincleType;
 
   @Column({ name: 'license_number', unique: true })
   licenseNumber!: string;

@@ -138,6 +138,12 @@ export class AuthController {
     return this.authService.refreshTokens(user);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  logout(@CurrentUser() user: JwtUser) {
+    return this.authService.logout(user);
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @Get('admin/ping')

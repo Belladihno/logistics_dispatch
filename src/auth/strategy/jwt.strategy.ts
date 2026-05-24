@@ -12,12 +12,14 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: UserRole;
+  driverProfileId: string | null;
 }
 
 export interface JwtUser {
   userId: string;
   email: string;
   role: UserRole;
+  driverProfileId: string | null;
 }
 
 @Injectable()
@@ -45,6 +47,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       userId: user.id,
       email: user.email,
       role: user.role,
+      driverProfileId: payload.driverProfileId,
     };
   }
 }

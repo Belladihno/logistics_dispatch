@@ -39,7 +39,7 @@ export class OrderStatusHistory {
     enum: OrderStatus,
     nullable: true,
   })
-  previousStatus?: OrderStatus;
+  previousStatus?: OrderStatus | null;
 
   @Column({ name: 'new_status', type: 'enum', enum: OrderStatus })
   newStatus!: OrderStatus;

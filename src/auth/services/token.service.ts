@@ -7,6 +7,10 @@ import { randomBytes } from 'crypto';
 import { Hash, verifyHash } from 'src/common/utils/hash.utils';
 import type { StringValue } from 'ms';
 import { RedisService } from 'src/redis/redis.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Driver } from 'src/drivers/entities/driver.entity';
+import { UserRole } from 'src/users/enums/user-role.enum';
+import { Repository } from 'typeorm';
 
 @Injectable()
 export class TokenService {
@@ -16,16 +20,24 @@ export class TokenService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly redisService: RedisService,
+    @InjectRepository(Driver)
+    private readonly driverRepo: Repository<Driver>,
   ) {}
 
   async generateTokens(user: User): Promise<{
     accessToken: string;
     refreshToken: string;
   }> {
+    const driverProfileId = await this.resolveDriverProfileId(
+      user.id,
+      user.role,
+    );
+
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
+      driverProfileId,
     };
 
     const expiresIn = this.config.getOrThrow<string>(
@@ -49,11 +61,30 @@ export class TokenService {
     return { accessToken, refreshToken };
   }
 
+  async resolveDriverProfileId(
+    userId: string,
+    userRole: UserRole,
+  ): Promise<string | null> {
+    if (userRole !== UserRole.DRIVER) return null;
+
+    const driverProfile = await this.driverRepo.findOne({
+      select: {
+        id: true,
+      },
+      where: {
+        userId,
+      },
+    });
+
+    return driverProfile?.id ?? null;
+  }
+
   async verifyRefreshToken(incomingRefreshToken: string): Promise<string> {
-    const [tokenOwnerUserId, tokenSecretPart] = incomingRefreshToken.split(
-      '.',
-      2,
-    );
+    const separatorIndex = incomingRefreshToken.indexOf('.');
+    const tokenOwnerUserId =
+      separatorIndex > 0 ? incomingRefreshToken.slice(0, separatorIndex) : '';
+    const tokenSecretPart =
+      separatorIndex > 0 ? incomingRefreshToken.slice(separatorIndex + 1) : '';
 
     if (!tokenOwnerUserId || !tokenSecretPart) {
       throw new UnauthorizedException('Malformed refresh token');
@@ -77,6 +108,12 @@ export class TokenService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
+    await this.redisService.del(redisKeyForUserRefreshToken);
+
     return tokenOwnerUserId;
+  }
+
+  async revokeRefreshToken(userId: string): Promise<void> {
+    await this.redisService.del(`refresh:${userId}`);
   }
 }

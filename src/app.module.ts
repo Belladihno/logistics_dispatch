@@ -17,6 +17,7 @@ import {
 } from './common/throttler/throttle-key.util';
 import { throttleConfig } from './common/throttler/throttle.config';
 import { OrdersModule } from './orders/orders.module';
+import { DriversModule } from './drivers/drivers.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { OrdersModule } from './orders/orders.module';
     AuthModule,
     UsersModule,
     OrdersModule,
+    DriversModule,
   ],
 
   controllers: [AppController],

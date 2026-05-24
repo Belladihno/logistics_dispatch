@@ -14,14 +14,17 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { RedisInfrastructureModule } from 'src/redis/redis.module';
 import { MailModule } from 'src/mail/mail.module';
+import { Driver } from 'src/drivers/entities/driver.entity';
+import { UsersModule } from 'src/users/users.module';
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt', session: false }),
     JwtModule.register({}),
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, Driver]),
     RedisInfrastructureModule,
     MailModule,
+    UsersModule,
   ],
   controllers: [AuthController],
   providers: [

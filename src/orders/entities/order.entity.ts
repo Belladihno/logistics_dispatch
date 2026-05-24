@@ -16,6 +16,8 @@ import { OrderStatus } from '../enums/order-status.enum';
 import { Driver } from '../../drivers/entities/driver.entity';
 import { User } from '../../users/entities/user.entity';
 import { OrderStatusHistory } from './order-status-history.entity';
+import { OrderType } from '../enums/order-type.enum';
+import { VehincleType } from '../../drivers/enums/vehincle-type.enum';
 
 @Entity('orders')
 @Index('idx_orders_customer_id', ['customerId'])
@@ -37,6 +39,23 @@ export class Order {
 
   @Column({ name: 'customer_id', type: 'uuid' })
   customerId!: string;
+
+  @Column({ type: 'text', nullable: true })
+  notes?: string;
+
+  @Column({
+    name: 'order_type',
+    type: 'enum',
+    enum: OrderType,
+  })
+  orderType!: OrderType;
+
+  @Column({
+    name: 'vehicle_type',
+    type: 'enum',
+    enum: VehincleType,
+  })
+  vehicleType!: VehincleType;
 
   @Column({ name: 'pickup_address', type: 'text' })
   pickupAddress!: string;

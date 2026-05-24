@@ -22,6 +22,10 @@ export class RedisService {
     return this.redis.del(key);
   }
 
+  async delete(key: string): Promise<number> {
+    return this.redis.del(key);
+  }
+
   getClient(): Redis {
     return this.redis;
   }
