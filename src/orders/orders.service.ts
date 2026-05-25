@@ -2,7 +2,9 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -19,14 +21,17 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { JwtUser } from 'src/auth/strategy/jwt.strategy';
 import { UserRole } from 'src/users/enums/user-role.enum';
 import { ORDER_TRANSITIONS } from './constants/order-transitions.contant';
+import { DispatchService } from 'src/dispatch/dispatch.service';
 
 @Injectable()
 export class OrdersService {
   private static readonly MAX_LIMIT = 100;
+  private readonly logger = new Logger(OrdersService.name);
 
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
+    private readonly dispatchService: DispatchService,
   ) {}
 
   async createOrder(
@@ -85,7 +90,7 @@ export class OrdersService {
       },
     );
 
-    await this.triggerDispatch();
+    await this.triggerDispatch(order.id);
 
     return toOrderResponse(order);
   }
@@ -348,8 +353,18 @@ export class OrdersService {
     }
   }
 
-  private async triggerDispatch(): Promise<void> {
-    // Placeholder for async dispatch orchestration (queue, matching, retries).
+  private async triggerDispatch(orderId: string): Promise<void> {
+    try {
+      await this.dispatchService.triggerDispatch(orderId);
+    } catch (error) {
+      this.logger.error(
+        `Failed to enqueue dispatch job for order ${orderId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new ServiceUnavailableException(
+        'Unable to start dispatch at this time. Please try again.',
+      );
+    }
   }
 
   private encodeCursor(order: Order): string {

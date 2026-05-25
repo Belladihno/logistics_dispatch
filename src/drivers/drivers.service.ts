@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -6,11 +7,12 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Driver } from './entities/driver.entity';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { JwtUser } from 'src/auth/strategy/jwt.strategy';
 import { DriverResponse } from './interfaces/driver-response.interface';
 import { toDriverResponse } from './mappers/driver.mapper';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { DispatchService } from 'src/dispatch/dispatch.service';
 
 @Injectable()
 export class DriversService {
@@ -19,6 +21,8 @@ export class DriversService {
   constructor(
     @InjectRepository(Driver)
     private readonly driverRepo: Repository<Driver>,
+    private readonly dispatchService: DispatchService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async getMyProfile(user: JwtUser): Promise<DriverResponse> {
@@ -129,22 +133,49 @@ export class DriversService {
   }
 
   async toggleSuspension(driverId: string): Promise<DriverResponse> {
-    const driver = await this.driverRepo.findOne({
-      where: { id: driverId },
-      relations: { user: true },
+    const updatedDriver = await this.dataSource.transaction(async (manager) => {
+      const driver = await manager
+        .getRepository(Driver)
+        .createQueryBuilder('driver')
+        .leftJoinAndSelect('driver.user', 'user')
+        .setLock('pessimistic_write')
+        .where('driver.id = :driverId', { driverId })
+        .getOne();
+
+      if (!driver) throw new NotFoundException('Driver not found');
+
+      if (!driver.isSuspended && driver.onlineStatus) {
+        driver.onlineStatus = false;
+      }
+
+      driver.isSuspended = !driver.isSuspended;
+
+      return manager.save(Driver, driver);
     });
 
-    if (!driver) throw new NotFoundException('Driver not found');
+    return toDriverResponse(updatedDriver);
+  }
 
-    if (!driver.isSuspended && driver.onlineStatus) {
-      driver.onlineStatus = false;
+  async acceptOrderDispatch(
+    orderId: string,
+    user: JwtUser,
+  ): Promise<{ message: string }> {
+    if (!user.driverProfileId) {
+      throw new BadRequestException('Driver profile missing from token');
     }
 
-    driver.isSuspended = !driver.isSuspended;
+    return this.dispatchService.acceptDispatch(orderId, user.driverProfileId);
+  }
 
-    const updated = await this.driverRepo.save(driver);
+  async rejectOrderDispatch(
+    orderId: string,
+    user: JwtUser,
+  ): Promise<{ message: string }> {
+    if (!user.driverProfileId) {
+      throw new BadRequestException('Driver profile missing from token');
+    }
 
-    return toDriverResponse(updated);
+    return this.dispatchService.rejectDispatch(orderId, user.driverProfileId);
   }
 
   private encodeCursor(driver: Driver): string {

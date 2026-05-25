@@ -6,18 +6,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { MailModule } from './mail/mail.module';
-import { ThrottlerGuard, ThrottlerModule, minutes } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
-import { RedisInfrastructureModule } from './redis/redis.module';
-import { RedisService } from './redis/redis.service';
-import { RedisThrottlerStorage } from './common/throttler/redis-throttler-storage';
-import {
-  generateThrottleKey,
-  getClientTracker,
-} from './common/throttler/throttle-key.util';
-import { throttleConfig } from './common/throttler/throttle.config';
 import { OrdersModule } from './orders/orders.module';
 import { DriversModule } from './drivers/drivers.module';
+import { DispatchModule } from './dispatch/dispatch.module';
+import { BullMqInfrastructureModule } from './bullmq/bullmq.module';
+import { ThrottlerInfrastructureModule } from './common/throttler/throttler-infrastructure.module';
 
 @Module({
   imports: [
@@ -34,46 +27,17 @@ import { DriversModule } from './drivers/drivers.module';
         migrationsRun: false,
       }),
     }),
-    ThrottlerModule.forRootAsync({
-      imports: [ConfigModule, RedisInfrastructureModule],
-      inject: [ConfigService, RedisService],
-      useFactory: (config: ConfigService, redisService: RedisService) => {
-        const globalTtlMs =
-          Number(config.get<string>('THROTTLE_GLOBAL_TTL_MS')) ||
-          throttleConfig.global.ttlMs ||
-          minutes(1);
-        const globalLimit =
-          Number(config.get<string>('THROTTLE_GLOBAL_LIMIT')) ||
-          throttleConfig.global.limit;
-        const globalBlockMs =
-          Number(config.get<string>('THROTTLE_GLOBAL_BLOCK_MS')) ||
-          throttleConfig.global.blockMs ||
-          minutes(2);
-
-        return {
-          throttlers: [
-            {
-              name: 'default',
-              ttl: globalTtlMs,
-              limit: globalLimit,
-              blockDuration: globalBlockMs,
-            },
-          ],
-          storage: new RedisThrottlerStorage(redisService),
-          getTracker: getClientTracker,
-          generateKey: generateThrottleKey,
-          errorMessage: 'Too many requests. Please try again later.',
-        };
-      },
-    }),
+    BullMqInfrastructureModule,
+    ThrottlerInfrastructureModule,
     MailModule,
     AuthModule,
     UsersModule,
     OrdersModule,
     DriversModule,
+    DispatchModule,
   ],
 
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [AppService],
 })
 export class AppModule {}

@@ -25,6 +25,8 @@ import type { JwtUser } from 'src/auth/strategy/jwt.strategy';
 export class DriversController {
   constructor(private readonly driversService: DriversService) {}
 
+  //Static routes — must stay above all parameterized routes
+
   @Get('me')
   @Roles(UserRole.DRIVER)
   getMyProfile(@CurrentUser() user: JwtUser) {
@@ -43,6 +45,24 @@ export class DriversController {
     return this.driversService.updateLocation(user, dto);
   }
 
+  @Patch('orders/:orderId/accept')
+  @Roles(UserRole.DRIVER)
+  acceptOrderDispatch(
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.driversService.acceptOrderDispatch(orderId, user);
+  }
+
+  @Patch('orders/:orderId/reject')
+  @Roles(UserRole.DRIVER)
+  rejectOrderDispatch(
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.driversService.rejectOrderDispatch(orderId, user);
+  }
+
   @Get()
   @Roles(UserRole.ADMIN)
   findAll(
@@ -53,6 +73,8 @@ export class DriversController {
   ) {
     return this.driversService.findAll(limit, cursor, onlineOnly);
   }
+
+  // Parameterized routes  must stay below all static routes
 
   @Get(':id')
   @Roles(UserRole.ADMIN)

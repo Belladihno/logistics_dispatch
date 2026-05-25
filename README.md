@@ -1,133 +1,148 @@
 # Logistics Dispatch API
 
-NestJS backend for a logistics dispatch platform with authentication, user management, and driver management.
+This repository contains a NestJS 11 backend for a logistics dispatch platform. It implements authentication, user management, driver support, and a lightweight dispatch workflow with background jobs and WebSocket event publishing.
 
-## Tech Stack
+This README documents the project's structure, runtime requirements, environment variables, common developer tasks, and the WebSocket event surface provided by the codebase.
 
-- **Framework:** NestJS 11
-- **Database:** PostgreSQL via TypeORM (migrations-based)
-- **Auth:** JWT access tokens + opaque refresh tokens (Redis), Google OAuth 2.0
-- **Password Hashing:** Argon2id
-- **Cache/Session:** Redis (ioredis)
-- **Email:** Nodemailer (SMTP)
-- **Docs:** Swagger/OpenAPI at `/docs`
-- **Validation:** class-validator + class-transformer
+## Tech stack
+
+- Framework: NestJS 11
+- Database: PostgreSQL via TypeORM (migrations)
+- Background jobs: BullMQ (Redis-backed)
+- Real-time: Socket.IO gateway (`@nestjs/websockets`, `@nestjs/platform-socket.io`)
+- Cache/session: Redis (ioredis)
+- Auth: JWT access tokens + opaque refresh tokens (Redis), Google OAuth
+- Email: Nodemailer (SMTP/Gmail)
+- Validation: `class-validator` + `class-transformer`
+
+## High-level modules
+
+- `src/auth` — authentication flows, JWT + refresh tokens, Google OAuth, guards, decorators.
+- `src/users` — user profile endpoints and mappers.
+- `src/drivers` — driver controllers/services/entities (driver profile, availability, accept/reject dispatch).
+- `src/dispatch` — dispatch orchestration, assignment logic, BullMQ jobs, and timeout handling.
+- `src/events` — WebSocket gateway and `EventPublisherService` abstraction that emits domain events (gateway implementation is internal; publisher is exported).
+- `src/redis` — Redis helpers and TTL-backed storage (used for refresh tokens and dispatch timeout mapping).
+- `src/mail` — mailer service and templates.
+- `src/common` — pipes, filters, interceptors, and utilities.
+
+## WebSocket events
+
+The codebase provides a small event surface for real-time client updates.
+
+- Event names:
+	- `dispatch:assigned` — emitted when an order is assigned to a driver.
+	- `order:status_changed` — emitted when an order's status changes (e.g., DRIVER_ARRIVING, EXPIRED).
+- Room conventions:
+	- Driver room: `driver:{driverId}`
+	- Order room: `order:{orderId}`
+- Usage:
+	- Domain code calls `EventPublisherService.notifyDriverAssigned(orderId, driverId)` and `EventPublisherService.notifyCustomerStatusChanged(orderId, status)` to publish events.
+	- The `EventsGateway` implements Socket.IO emission and is intentionally kept internal; other modules should use only the publisher.
+
+Note: `src/events/events.gateway.ts` uses `process.env.ALLOWED_ORIGIN` for CORS. Configure that in production to mirror your HTTP CORS policy.
 
 ## Prerequisites
 
 - Node.js 20+
 - PostgreSQL
-- Redis (see `docker-compose.yml`)
+- Redis
 
-## Setup
+Redis is used for refresh tokens and as the backing store for BullMQ. See `docker-compose.yml` for a convenient Redis service for local development.
+
+## Quick start (development)
+
+1. Install dependencies
 
 ```bash
-# Install dependencies
-$ npm install
-
-# Start Redis (Docker)
-$ docker compose up -d
-
-# Copy and configure environment
-$ cp .env.example .env
-
-# Run migrations
-$ npm run migration:run
-
-# Start development server
-$ npm run start:dev
+npm install
 ```
 
-## Scripts
+2. Start Redis (local using Docker)
 
-| Script | Purpose |
-|---|---|
-| `npm run start:dev` | Development with hot-reload |
-| `npm run build` | Compile to `dist/` |
-| `npm run start:prod` | Run compiled production build |
-| `npm run migration:run` | Apply pending database migrations |
-| `npm run migration:generate -- src/database/migrations/<Name>` | Generate a new migration from entity changes |
-| `npm run lint` | ESLint |
-| `npm run test` | Unit tests |
-| `npm run test:e2e` | E2E tests |
+```bash
+docker compose up -d
+```
 
-## What's Implemented
+3. Create `.env` from the example and edit values
 
-### Authentication (`/auth`)
-- Email/password registration with email verification
-- Email/password login
-- Google OAuth 2.0 login
-- JWT access token (15m) + refresh token (7d, stored in Redis)
-- Email verification flow
-- Password reset (forgot-password email)
-- Token refresh
-- Global `JwtAuthGuard` (all endpoints secure by default; use `@Public()` to opt out)
-- Role-based access control (`@Roles()` decorator + `RolesGuard`)
-- Rate limiting groundwork via `@Throttle()` (NestJS)
+```bash
+cp .env.example .env
+# edit .env accordingly
+```
 
-### Users (`/users`)
-- Get own profile
-- Update own name
+4. Run database migrations
 
-### Email (`MailService`)
-- HTML email templates for verification and password reset
-- SMTP via Gmail
+```bash
+npm run migration:run
+```
 
-### Redis (`RedisService`)
-- Refresh token storage
-- Generic key-value ops with TTL
+5. Start the app in development mode
 
-### Infrastructure
-- Global `ValidationPipe` (whitelist, forbid non-whitelisted, transform)
-- Global `HttpExceptionFilter` (consistent error JSON)
-- Global request logging interceptor
-- Response time header interceptor
-- Swagger docs at `/docs` with bearer auth
-- 4 database migrations (users table + email verification + drivers table + password reset)
-- `docker-compose.yml` for Redis
+```bash
+npm run start:dev
+```
 
-## API Endpoints
+API docs (Swagger) are available at `/docs` when `SWAGGER_ENABLED` is enabled (default: enabled in non-production).
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `GET` | `/` | Public | Health check |
-| `POST` | `/auth/register` | Public | Register new user |
-| `POST` | `/auth/login` | Public | Login with email/password |
-| `POST` | `/auth/verify-email` | Public | Verify email (token in body) |
-| `GET` | `/auth/verify-email` | Public | Verify email (token in query) |
-| `POST` | `/auth/resend-verification-email` | Public | Resend verification email |
-| `POST` | `/auth/forgot-password` | Public | Request password reset |
-| `GET` | `/auth/google` | Public | Google OAuth login |
-| `GET` | `/auth/google/callback` | Public | Google OAuth callback |
-| `POST` | `/auth/refresh` | Refresh | Refresh tokens |
-| `GET` | `/auth/me` | JWT | Get current user |
-| `GET` | `/auth/admin/ping` | Admin | Admin health check |
-| `GET` | `/users/profile` | JWT | Get user profile |
-| `PATCH` | `/users/me/name` | JWT | Update own name |
+## Useful scripts
 
-## What's Not Yet Implemented
+- `npm run start:dev` — development with hot reload
+- `npm run build` — compile to `dist/`
+- `npm run start:prod` — run compiled build
+- `npm run migration:run` — apply migrations
+- `npm run migration:generate -- src/database/migrations/<Name>` — generate a new migration
+- `npm run lint` — run ESLint
+- `npm run test` — run unit tests (if present)
+- `npm run test:e2e` — run e2e tests
 
-- **Drivers module** — entity + migration exist, but no controller/service/module (not wired into app)
-- **Password reset completion** — forgot-password sends email, but no endpoint to submit the new password
-- **Admin user management** — no user listing, role assignment, or user deletion
-- **Driver CRUD** — no driver creation, updates, or queries
-- **Driver location tracking** — lat/lng fields exist on entity but no endpoints
-- **Dispatch/logistics logic** — no orders, shipments, or routing
-- **Unit tests** — no `.spec.ts` files yet (only the default NestJS e2e stub)
+## Environment variables
 
-## Environment Variables
+The following variables are used across the app (not exhaustive but the important ones):
 
-| Variable | Description |
-|---|---|
-| `DATABASE_URL` | PostgreSQL connection string |
-| `REDIS_URL` | Redis connection string |
-| `JWT_ACCESS_SECRET` | JWT signing secret |
-| `JWT_ACCESS_EXPIRY` | Access token TTL (e.g. `15m`) |
-| `JWT_REFRESH_EXPIRY` | Refresh token TTL (e.g. `7d`) |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
-| `MAIL_USER` | Gmail address for sending emails |
-| `MAIL_PASS` | Gmail app password |
-| `APP_BASE_URL` | Frontend base URL for verification/reset links |
-| `PORT` | Server port (default: 3000) |
-| `SWAGGER_ENABLED` | Force Swagger on/off (default: on in non-production) |
+- `DATABASE_URL` — Postgres connection string
+- `REDIS_URL` — Redis connection string
+- `PORT` — HTTP server port (default 3000)
+- `TRUST_PROXY` — set `true` when behind a proxy to enable `trust proxy`
+- `SWAGGER_ENABLED` — toggle Swagger UI
+- `ALLOWED_ORIGIN` — origin allowed for WebSocket CORS and recommended to mirror HTTP CORS in production
+
+# Authentication
+- `JWT_ACCESS_SECRET` — access token secret
+- `JWT_ACCESS_EXPIRY` — access token TTL (e.g. `15m`)
+- `JWT_REFRESH_EXPIRY` — refresh token TTL (e.g. `7d`)
+
+# Google OAuth
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+
+# Mailer
+- `MAIL_USER` — SMTP username (Gmail address)
+- `MAIL_PASS` — SMTP app password
+- `APP_BASE_URL` — frontend base URL used to build verification/reset links
+
+# Dispatch tuning
+- `MAX_DISPATCH_ATTEMPTS` — maximum number of dispatch attempts before expiring an order (default in code)
+- `DISPATCH_TIMEOUT_SECONDS` — seconds to wait for driver response before timeout
+
+If you need a complete list of environment variables used in the repo, search for `configService.get(` in `src/`.
+
+## Runtime notes & developer guidance
+
+- The Socket.IO adapter is registered early in `src/main.ts` so gateways initialize with the correct adapter during bootstrap.
+- Use the `EventPublisherService` (exported by `src/events/events.module.ts`) as the single entrypoint for emitting domain events. The `EventsGateway` is intentionally not exported to keep the implementation internal.
+- Keep static routes (e.g., `GET 'me'`) declared before parameterized routes (e.g., `GET ':id'`) to avoid route collisions in controllers such as [src/drivers/drivers.controller.ts](src/drivers/drivers.controller.ts#L1-L120).
+- The dispatch flow uses BullMQ to schedule an assignment and a delayed timeout job; the mapping between order and timeout job id is cached in Redis so the service can cancel timeouts when drivers accept.
+
+## Testing & validation
+
+- To validate WebSocket behavior locally, run the server and connect a `socket.io-client` instance to the server, join the appropriate room (`driver:{id}` or `order:{id}`) and trigger dispatch flows via the API or directly via `DispatchService`.
+- Consider adding unit tests that mock `EventPublisherService` and assert it's called by `DispatchService` in the accept/reject/timeout paths.
+
+## Contributing
+
+- Follow existing coding patterns (small focused providers, transaction-based DB updates for dispatch flow).
+- Run lint and tests before opening a PR.
+
+---
+

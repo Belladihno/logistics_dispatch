@@ -103,7 +103,7 @@ export class Order {
   assignedDriver?: Driver;
 
   @Column({ name: 'assigned_driver_id', nullable: true })
-  assignedDriverId?: string;
+  assignedDriverId?: string | null;
 
   @Column({
     name: 'estimated_price',

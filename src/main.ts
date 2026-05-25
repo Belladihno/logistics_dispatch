@@ -4,10 +4,14 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { ResponseTimeInterceptor } from './common/interceptors/response-time.interceptor';
 import { ValidationPipe } from '@nestjs/common';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // Register WebSocket adapter (Socket.IO) early so gateways initialize
+  // with the correct adapter during module bootstrap.
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   if (process.env.TRUST_PROXY === 'true') {
     const httpAdapter = app.getHttpAdapter().getInstance() as {

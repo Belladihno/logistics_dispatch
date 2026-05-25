@@ -15,7 +15,7 @@ export interface OrderResponse {
   deliveryLongitude: number;
   notes?: string;
   status: OrderStatus;
-  assignedDriverId?: string;
+  assignedDriverId?: string | null;
   estimatedPrice: number;
   dispatchAttempts: number;
   createdAt: Date;
