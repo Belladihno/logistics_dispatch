@@ -33,9 +33,9 @@ export class OrdersService {
     dto: CreateOrderDto,
     customerId: string,
   ): Promise<OrderResponse> {
-    const allowedVehicles = ORDER_VEHINCLE_MAP[dto.orderType];
+    const allowedVehincles = ORDER_VEHINCLE_MAP[dto.orderType];
 
-    if (!allowedVehicles.includes(dto.vehincleType)) {
+    if (!allowedVehincles.includes(dto.vehincleType)) {
       throw new UnprocessableEntityException(
         `Vehincle type ${dto.vehincleType} is not suitable for order type ${dto.orderType}`,
       );
@@ -56,7 +56,7 @@ export class OrdersService {
         const newOrder = manager.create(Order, {
           customerId,
           orderType: dto.orderType,
-          vehicleType: dto.vehincleType,
+          vehincleType: dto.vehincleType,
           pickupAddress: dto.pickupAddress,
           pickupLatitude: dto.pickupLatitude,
           pickupLongitude: dto.pickupLongitude,

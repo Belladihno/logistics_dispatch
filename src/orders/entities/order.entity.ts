@@ -51,11 +51,11 @@ export class Order {
   orderType!: OrderType;
 
   @Column({
-    name: 'vehicle_type',
+    name: 'vehincle_type',
     type: 'enum',
     enum: VehincleType,
   })
-  vehicleType!: VehincleType;
+  vehincleType!: VehincleType;
 
   @Column({ name: 'pickup_address', type: 'text' })
   pickupAddress!: string;

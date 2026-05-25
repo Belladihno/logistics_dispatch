@@ -7,6 +7,7 @@ import {
   Param,
   ParseEnumPipe,
   ParseIntPipe,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -37,7 +38,7 @@ export class OrdersController {
   @Get(':id')
   @Roles(UserRole.CUSTOMER, UserRole.ADMIN, UserRole.DRIVER)
   findById(
-    @Param('id', ParseIntPipe) orderId: string,
+    @Param('id', ParseUUIDPipe) orderId: string,
     @CurrentUser() user: JwtUser,
   ) {
     return this.ordersService.findById(orderId, user);
@@ -58,7 +59,7 @@ export class OrdersController {
   @Patch(':id/status')
   @Roles(UserRole.DRIVER, UserRole.ADMIN)
   updateStatus(
-    @Param('id', ParseIntPipe) orderId: string,
+    @Param('id', ParseUUIDPipe) orderId: string,
     @Body() dto: UpdateOrderStatusDto,
     @CurrentUser() user: JwtUser,
   ) {
@@ -67,14 +68,17 @@ export class OrdersController {
 
   @Patch(':id/cancel')
   @Roles(UserRole.CUSTOMER, UserRole.ADMIN)
-  cancelOrder(@Param('id') orderId: string, @CurrentUser() user: JwtUser) {
+  cancelOrder(
+    @Param('id', ParseUUIDPipe) orderId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
     return this.ordersService.cancelOrder(orderId, user);
   }
 
   @Delete(':id')
   @Roles(UserRole.ADMIN)
   softDelete(
-    @Param('id', ParseIntPipe) orderId: string,
+    @Param('id', ParseUUIDPipe) orderId: string,
   ): Promise<{ message: string }> {
     return this.ordersService.softDelete(orderId);
   }

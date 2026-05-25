@@ -11,16 +11,16 @@ export class AddedOrderAndVehincleTypeToOrdersTable1779190469874 implements Migr
       `ALTER TABLE "orders" ADD "order_type" "public"."orders_order_type_enum" NOT NULL`,
     );
     await queryRunner.query(
-      `CREATE TYPE "public"."orders_vehicle_type_enum" AS ENUM('bike', 'car', 'van', 'truck')`,
+      `CREATE TYPE "public"."orders_vehincle_type_enum" AS ENUM('bike', 'car', 'van', 'truck')`,
     );
     await queryRunner.query(
-      `ALTER TABLE "orders" ADD "vehicle_type" "public"."orders_vehicle_type_enum" NOT NULL`,
+      `ALTER TABLE "orders" ADD "vehincle_type" "public"."orders_vehincle_type_enum" NOT NULL`,
     );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "orders" DROP COLUMN "vehicle_type"`);
-    await queryRunner.query(`DROP TYPE "public"."orders_vehicle_type_enum"`);
+    await queryRunner.query(`ALTER TABLE "orders" DROP COLUMN "vehincle_type"`);
+    await queryRunner.query(`DROP TYPE "public"."orders_vehincle_type_enum"`);
     await queryRunner.query(`ALTER TABLE "orders" DROP COLUMN "order_type"`);
     await queryRunner.query(`DROP TYPE "public"."orders_order_type_enum"`);
   }

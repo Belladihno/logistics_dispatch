@@ -6,7 +6,7 @@ export const toOrderResponse = (order: Order): OrderResponse => {
     id: order.id,
     customerId: order.customerId,
     orderType: order.orderType,
-    vehicleType: order.vehicleType,
+    vehincleType: order.vehincleType,
     pickupAddress: order.pickupAddress,
     pickupLatitude: Number(order.pickupLatitude),
     pickupLongitude: Number(order.pickupLongitude),

@@ -3,7 +3,7 @@ import { VehincleType } from 'src/drivers/enums/vehincle-type.enum';
 
 export class PromoteToDriverDto {
   @IsEnum(VehincleType)
-  vehicleType!: VehincleType;
+  vehincleType!: VehincleType;
 
   @IsString()
   @IsNotEmpty()

@@ -75,7 +75,7 @@ export class UsersService {
 
       const driver = manager.create(Driver, {
         userId,
-        vehicleType: dto.vehicleType,
+        vehincleType: dto.vehincleType,
         licenseNumber: dto.licenseNumber,
         onlineStatus: false,
         rating: 5.0,
