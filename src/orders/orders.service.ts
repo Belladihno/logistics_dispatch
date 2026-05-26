@@ -46,15 +46,25 @@ export class OrdersService {
     customerId: string,
     idempotencyKey?: string,
   ): Promise<OrderResponse> {
-    // Idempotency: if client provides an idempotency key, check Redis first
+    // Idempotency: if client provides an idempotency key, sanitize and check Redis first
+    let sanitizedKey: string | undefined;
     if (idempotencyKey) {
+      sanitizedKey = idempotencyKey.trim();
+      if (sanitizedKey.length === 0 || sanitizedKey.length > 255) {
+        throw new UnprocessableEntityException('Invalid idempotency key');
+      }
+
       const cached = await this.redisService.get(
-        IDEMPOTENCY_REDIS_PREFIX(idempotencyKey),
+        IDEMPOTENCY_REDIS_PREFIX(sanitizedKey),
       );
       if (cached) {
-        // Return the original response payload as a 409 Conflict
+        // Return the original response payload as a structured 409 Conflict
         const deserialized = JSON.parse(cached) as OrderResponse;
-        throw new ConflictException(deserialized);
+        throw new ConflictException({
+          statusCode: 409,
+          message: 'Duplicate request — original order returned',
+          data: deserialized,
+        });
       }
     }
     const allowedVehincles = ORDER_VEHINCLE_MAP[dto.orderType];
@@ -120,14 +130,9 @@ export class OrdersService {
 
     const response = toOrderResponse(order);
 
-    // Store idempotency response in Redis for TTL if key was provided.
-    // NOTE: This is not strictly atomic with the DB commit; if the process
-    // crashes after the DB commit but before writing Redis, a retry may create
-    // a duplicate order. A true atomic guarantee requires outbox-extension
-    // which is out of scope.
-    if (idempotencyKey) {
+    if (sanitizedKey) {
       await this.redisService.setWithExpiry(
-        IDEMPOTENCY_REDIS_PREFIX(idempotencyKey),
+        IDEMPOTENCY_REDIS_PREFIX(sanitizedKey),
         JSON.stringify(response),
         IDEMPOTENCY_KEY_TTL_SECONDS,
       );
