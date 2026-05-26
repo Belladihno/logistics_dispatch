@@ -464,7 +464,7 @@ export class OrdersService {
     if (order.orderStatus === OrderStatus.EXPIRED) {
       updatedOrder = await this.dataSource.transaction<Order>(
         async (manager): Promise<Order> => {
-          await manager
+          const result = await manager
             .createQueryBuilder()
             .update(Order)
             .set({
@@ -479,6 +479,12 @@ export class OrdersService {
               version: order.version,
             })
             .execute();
+
+          if (result.affected === 0) {
+            throw new ConflictException(
+              'Order was modified by another request, please retry',
+            );
+          }
 
           const history = manager.create(OrderStatusHistory, {
             orderId,
