@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Driver } from 'src/drivers/entities/driver.entity';
 import { Order } from 'src/orders/entities/order.entity';
 import { EventPublisherService } from 'src/events/event-publisher.service';
@@ -14,6 +14,7 @@ import {
   ETA_JOB_KEY,
   ETA_RECALCULATE_DELAY_MS,
   ETA_AVERAGE_SPEED_KMH,
+  ACTIVE_ORDER_KEY,
 } from './constants/tracking.constants';
 import { calculateDistance } from 'src/common/utils/distance.util';
 import { OrderStatus } from 'src/orders/enums/order-status.enum';
@@ -47,18 +48,27 @@ export class TrackingService {
       { currentLatitude: lat, currentLongitude: lng },
     );
 
-    const ACTIVE_ORDER_KEY = `tracking:active_order:${driverProfileId}`;
-    let orderId = await this.redisService.get(ACTIVE_ORDER_KEY);
+    let orderId = await this.redisService.get(
+      ACTIVE_ORDER_KEY(driverProfileId),
+    );
     if (!orderId) {
       const active = await this.orderRepo.findOne({
         where: {
           assignedDriverId: driverProfileId,
-          orderStatus: OrderStatus.DRIVER_ARRIVING,
+          orderStatus: In([
+            OrderStatus.DRIVER_ARRIVING,
+            OrderStatus.PICKED_UP,
+            OrderStatus.IN_TRANSIT,
+          ]),
         },
       });
       if (active) {
         orderId = active.id;
-        await this.redisService.setWithExpiry(ACTIVE_ORDER_KEY, orderId, 60);
+        await this.redisService.setWithExpiry(
+          ACTIVE_ORDER_KEY(driverProfileId),
+          orderId,
+          60,
+        );
       }
     }
 
@@ -141,8 +151,8 @@ export class TrackingService {
     const distanceKm = calculateDistance(
       Number(driver.currentLatitude),
       Number(driver.currentLongitude),
-      Number(order.deliveryLatitude as any),
-      Number(order.deliveryLongitude as any),
+      Number(order.deliveryLatitude),
+      Number(order.deliveryLongitude),
     );
 
     const etaSeconds = Math.round((distanceKm / ETA_AVERAGE_SPEED_KMH) * 3600);
