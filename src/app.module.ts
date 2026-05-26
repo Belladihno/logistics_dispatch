@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -9,6 +10,8 @@ import { MailModule } from './mail/mail.module';
 import { OrdersModule } from './orders/orders.module';
 import { DriversModule } from './drivers/drivers.module';
 import { DispatchModule } from './dispatch/dispatch.module';
+import { EventsModule } from './events/events.module';
+import { OutboxModule } from './outbox/outbox.module';
 import { BullMqInfrastructureModule } from './bullmq/bullmq.module';
 import { ThrottlerInfrastructureModule } from './common/throttler/throttler-infrastructure.module';
 
@@ -27,6 +30,7 @@ import { ThrottlerInfrastructureModule } from './common/throttler/throttler-infr
         migrationsRun: false,
       }),
     }),
+    ScheduleModule.forRoot(),
     BullMqInfrastructureModule,
     ThrottlerInfrastructureModule,
     MailModule,
@@ -35,6 +39,8 @@ import { ThrottlerInfrastructureModule } from './common/throttler/throttler-infr
     OrdersModule,
     DriversModule,
     DispatchModule,
+    EventsModule,
+    OutboxModule,
   ],
 
   controllers: [AppController],

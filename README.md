@@ -34,7 +34,7 @@ The codebase provides a small event surface for real-time client updates.
 	- `dispatch:assigned` — emitted when an order is assigned to a driver.
 	- `order:status_changed` — emitted when an order's status changes (e.g., DRIVER_ARRIVING, EXPIRED).
 - Room conventions:
-	- Driver room: `driver:{driverId}`
+	- Driver room: `driver:{driverProfileId}` (the driver's profile ID assigned in the `drivers` table — the dispatch system emits `dispatch:assigned` using the driver profile id)
 	- Order room: `order:{orderId}`
 - Usage:
 	- Domain code calls `EventPublisherService.notifyDriverAssigned(orderId, driverId)` and `EventPublisherService.notifyCustomerStatusChanged(orderId, status)` to publish events.
@@ -136,7 +136,7 @@ If you need a complete list of environment variables used in the repo, search fo
 
 ## Testing & validation
 
-- To validate WebSocket behavior locally, run the server and connect a `socket.io-client` instance to the server, join the appropriate room (`driver:{id}` or `order:{id}`) and trigger dispatch flows via the API or directly via `DispatchService`.
+- To validate WebSocket behavior locally, run the server and connect a `socket.io-client` instance to the server, join the appropriate room (`driver:{driverProfileId}` or `order:{orderId}`) and trigger dispatch flows via the API or directly via `DispatchService`.
 - Consider adding unit tests that mock `EventPublisherService` and assert it's called by `DispatchService` in the accept/reject/timeout paths.
 
 ## Contributing

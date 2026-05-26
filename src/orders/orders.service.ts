@@ -4,7 +4,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -21,7 +20,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { JwtUser } from 'src/auth/strategy/jwt.strategy';
 import { UserRole } from 'src/users/enums/user-role.enum';
 import { ORDER_TRANSITIONS } from './constants/order-transitions.contant';
-import { DispatchService } from 'src/dispatch/dispatch.service';
+import { OutboxEvent } from 'src/outbox/entities/outbox-event.entity';
+import { OutboxStatus } from 'src/outbox/enums/outbox-status.enum';
 
 @Injectable()
 export class OrdersService {
@@ -31,7 +31,6 @@ export class OrdersService {
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
-    private readonly dispatchService: DispatchService,
   ) {}
 
   async createOrder(
@@ -86,11 +85,18 @@ export class OrdersService {
 
         await manager.save(OrderStatusHistory, history);
 
+        const outbox = manager.create(OutboxEvent, {
+          eventType: 'dispatch.trigger',
+          payload: { orderId: savedOrder.id },
+          status: OutboxStatus.PENDING,
+          attempts: 0,
+        });
+
+        await manager.save(OutboxEvent, outbox);
+
         return savedOrder;
       },
     );
-
-    await this.triggerDispatch(order.id);
 
     return toOrderResponse(order);
   }
@@ -349,20 +355,6 @@ export class OrdersService {
     if (!allowedTransitions.includes(newStatus)) {
       throw new UnprocessableEntityException(
         `Invalid order status transition from ${currentStatus} to ${newStatus}`,
-      );
-    }
-  }
-
-  private async triggerDispatch(orderId: string): Promise<void> {
-    try {
-      await this.dispatchService.triggerDispatch(orderId);
-    } catch (error) {
-      this.logger.error(
-        `Failed to enqueue dispatch job for order ${orderId}`,
-        error instanceof Error ? error.stack : undefined,
-      );
-      throw new ServiceUnavailableException(
-        'Unable to start dispatch at this time. Please try again.',
       );
     }
   }
