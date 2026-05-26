@@ -23,6 +23,11 @@ import { UserRole } from 'src/users/enums/user-role.enum';
 import { ORDER_TRANSITIONS } from './constants/order-transitions.contant';
 import { OutboxEvent } from 'src/outbox/entities/outbox-event.entity';
 import { OutboxStatus } from 'src/outbox/enums/outbox-status.enum';
+import { RedisService } from 'src/redis/redis.service';
+import {
+  IDEMPOTENCY_KEY_TTL_SECONDS,
+  IDEMPOTENCY_REDIS_PREFIX,
+} from './constants/order.constants';
 
 @Injectable()
 export class OrdersService {
@@ -33,12 +38,25 @@ export class OrdersService {
     private readonly dataSource: DataSource,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
     private readonly trackingService: TrackingService,
+    private readonly redisService: RedisService,
   ) {}
 
   async createOrder(
     dto: CreateOrderDto,
     customerId: string,
+    idempotencyKey?: string,
   ): Promise<OrderResponse> {
+    // Idempotency: if client provides an idempotency key, check Redis first
+    if (idempotencyKey) {
+      const cached = await this.redisService.get(
+        IDEMPOTENCY_REDIS_PREFIX(idempotencyKey),
+      );
+      if (cached) {
+        // Return the original response payload as a 409 Conflict
+        const deserialized = JSON.parse(cached) as OrderResponse;
+        throw new ConflictException(deserialized);
+      }
+    }
     const allowedVehincles = ORDER_VEHINCLE_MAP[dto.orderType];
 
     if (!allowedVehincles.includes(dto.vehincleType)) {
@@ -100,7 +118,22 @@ export class OrdersService {
       },
     );
 
-    return toOrderResponse(order);
+    const response = toOrderResponse(order);
+
+    // Store idempotency response in Redis for TTL if key was provided.
+    // NOTE: This is not strictly atomic with the DB commit; if the process
+    // crashes after the DB commit but before writing Redis, a retry may create
+    // a duplicate order. A true atomic guarantee requires outbox-extension
+    // which is out of scope.
+    if (idempotencyKey) {
+      await this.redisService.setWithExpiry(
+        IDEMPOTENCY_REDIS_PREFIX(idempotencyKey),
+        JSON.stringify(response),
+        IDEMPOTENCY_KEY_TTL_SECONDS,
+      );
+    }
+
+    return response;
   }
 
   async findById(orderId: string, user: JwtUser): Promise<OrderResponse> {

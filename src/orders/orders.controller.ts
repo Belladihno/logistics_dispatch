@@ -4,6 +4,7 @@ import {
   Delete,
   DefaultValuePipe,
   Get,
+  Headers,
   Param,
   ParseEnumPipe,
   ParseIntPipe,
@@ -13,6 +14,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiHeader } from '@nestjs/swagger';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
@@ -31,8 +33,18 @@ export class OrdersController {
 
   @Post()
   @Roles(UserRole.CUSTOMER)
-  createOrder(@Body() dto: CreateOrderDto, @CurrentUser() user: JwtUser) {
-    return this.ordersService.createOrder(dto, user.userId);
+  @ApiHeader({
+    name: 'idempotency-key',
+    required: false,
+    description:
+      'Client-provided idempotency key to deduplicate order creation within 24 hours',
+  })
+  createOrder(
+    @Body() dto: CreateOrderDto,
+    @CurrentUser() user: JwtUser,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.ordersService.createOrder(dto, user.userId, idempotencyKey);
   }
 
   @Get(':id')
