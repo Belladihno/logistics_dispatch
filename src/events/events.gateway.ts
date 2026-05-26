@@ -17,9 +17,12 @@ import {
   EVENT_JOIN_ERROR,
   ROOM_DRIVER,
   ROOM_ORDER,
+  EVENT_DRIVER_LOCATION_UPDATE,
 } from './events.constants';
 import type { JoinRoomPayload } from './events.constants';
 import { UserRole } from 'src/users/enums/user-role.enum';
+import { ModuleRef } from '@nestjs/core';
+import { TrackingService } from 'src/tracking/tracking.service';
 
 @WebSocketGateway({
   cors: { origin: process.env.ALLOWED_ORIGIN ?? '*', credentials: true },
@@ -32,7 +35,10 @@ export class EventsGateway
 
   private readonly logger = new Logger(EventsGateway.name);
 
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly moduleRef: ModuleRef,
+  ) {}
 
   afterInit(): void {
     this.logger.log('EventsGateway initialized');
@@ -111,6 +117,61 @@ export class EventsGateway
         err instanceof Error ? err.stack : undefined,
       );
       client.emit(EVENT_JOIN_ERROR, { reason: 'invalid_token' });
+    }
+  }
+
+  @SubscribeMessage(EVENT_DRIVER_LOCATION_UPDATE)
+  async handleDriverLocationUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { lat: number; lng: number; orderId?: string },
+  ): Promise<void> {
+    if (!payload) return;
+
+    try {
+      // Extract token from client's stored handshake auth if present (safe-guarded)
+      const auth = client.handshake.auth as unknown;
+      let token: string | undefined;
+      if (
+        auth &&
+        typeof auth === 'object' &&
+        auth !== null &&
+        'token' in auth
+      ) {
+        const t = (auth as Record<string, unknown>).token;
+        if (typeof t === 'string') token = t;
+      }
+      if (!token) {
+        client.emit('error', { reason: 'missing_token' });
+        return;
+      }
+
+      const decoded = this.jwtService.verify<{
+        role?: UserRole;
+        driverProfileId?: string;
+      }>(token);
+      if (decoded?.role !== UserRole.DRIVER || !decoded.driverProfileId) {
+        client.emit('error', { reason: 'not_driver' });
+        return;
+      }
+
+      const trackingService = this.moduleRef.get(TrackingService, {
+        strict: false,
+      });
+      if (!trackingService) {
+        this.logger.warn('TrackingService not available');
+        return;
+      }
+
+      await trackingService.handleLocationUpdate(
+        decoded.driverProfileId,
+        payload.lat,
+        payload.lng,
+      );
+    } catch (err) {
+      this.logger.warn(
+        'driver location update failed',
+        err instanceof Error ? err.stack : undefined,
+      );
     }
   }
 

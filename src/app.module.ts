@@ -11,6 +11,7 @@ import { OrdersModule } from './orders/orders.module';
 import { DriversModule } from './drivers/drivers.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { EventsModule } from './events/events.module';
+import { TrackingModule } from './tracking/tracking.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { BullMqInfrastructureModule } from './bullmq/bullmq.module';
 import { ThrottlerInfrastructureModule } from './common/throttler/throttler-infrastructure.module';
@@ -40,6 +41,7 @@ import { ThrottlerInfrastructureModule } from './common/throttler/throttler-infr
     DriversModule,
     DispatchModule,
     EventsModule,
+    TrackingModule,
     OutboxModule,
   ],
 

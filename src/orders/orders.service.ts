@@ -17,6 +17,7 @@ import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { toOrderResponse } from './mappers/order.mapper';
 import { OrderStatus } from './enums/order-status.enum';
 import { InjectRepository } from '@nestjs/typeorm';
+import { TrackingService } from 'src/tracking/tracking.service';
 import { JwtUser } from 'src/auth/strategy/jwt.strategy';
 import { UserRole } from 'src/users/enums/user-role.enum';
 import { ORDER_TRANSITIONS } from './constants/order-transitions.contant';
@@ -31,6 +32,7 @@ export class OrdersService {
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
+    private readonly trackingService: TrackingService,
   ) {}
 
   async createOrder(
@@ -213,6 +215,24 @@ export class OrdersService {
         return updated;
       },
     );
+
+    const terminalStatuses = new Set<OrderStatus>([
+      OrderStatus.DELIVERED,
+      OrderStatus.CANCELLED,
+      OrderStatus.FAILED,
+      OrderStatus.EXPIRED,
+    ]);
+
+    if (terminalStatuses.has(newStatus)) {
+      try {
+        await this.trackingService.cancelEtaJob(orderId);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to cancel ETA job for order ${orderId}`,
+          err instanceof Error ? err.stack : undefined,
+        );
+      }
+    }
 
     return toOrderResponse(updatedOrder);
   }

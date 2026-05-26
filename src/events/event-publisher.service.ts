@@ -3,7 +3,9 @@ import { EventsGateway } from './events.gateway';
 import {
   DispatchAssignedPayload,
   EVENT_DISPATCH_ASSIGNED,
+  EVENT_DISPATCH_TIMEOUT,
   EVENT_ORDER_STATUS_CHANGED,
+  EVENT_ORDER_LOCATION_BROADCAST,
   OrderStatusChangedPayload,
   ROOM_DRIVER,
   ROOM_ORDER,
@@ -25,9 +27,10 @@ export class EventPublisherService {
         payload,
       );
     } catch (err) {
+      const trace = err instanceof Error ? err.stack : String(err);
       this.logger.warn(
         `Publish dispatch:assigned failed for driver=${driverId}`,
-        err instanceof Error ? err.stack : undefined,
+        trace,
       );
     }
   }
@@ -45,9 +48,49 @@ export class EventPublisherService {
         payload,
       );
     } catch (err) {
+      const trace = err instanceof Error ? err.stack : String(err);
       this.logger.warn(
         `Publish order:status_changed failed for order=${orderId}`,
-        err instanceof Error ? err.stack : undefined,
+        trace,
+      );
+    }
+  }
+
+  notifyDriverTimeout(orderId: string, driverId: string): void {
+    const payload = { orderId };
+    try {
+      this.gateway.emitToRoom(
+        ROOM_DRIVER(driverId),
+        EVENT_DISPATCH_TIMEOUT,
+        payload,
+      );
+    } catch (err) {
+      const trace = err instanceof Error ? err.stack : String(err);
+      this.logger.warn(
+        `Publish dispatch:timeout failed for driver=${driverId}`,
+        trace,
+      );
+    }
+  }
+
+  notifyLocationBroadcast(
+    orderId: string,
+    lat: number,
+    lng: number,
+    eta?: number,
+  ): void {
+    const payload = { orderId, lat, lng, eta };
+    try {
+      this.gateway.emitToRoom(
+        ROOM_ORDER(orderId),
+        EVENT_ORDER_LOCATION_BROADCAST,
+        payload,
+      );
+    } catch (err) {
+      const trace = err instanceof Error ? err.stack : String(err);
+      this.logger.warn(
+        `Publish order:location_broadcast failed for order=${orderId}`,
+        trace,
       );
     }
   }

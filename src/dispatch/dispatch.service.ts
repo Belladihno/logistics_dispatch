@@ -28,6 +28,7 @@ import { OrderStatusHistory } from 'src/orders/entities/order-status-history.ent
 import { RedisService } from 'src/redis/redis.service';
 import { ConfigService } from '@nestjs/config';
 import { EventPublisherService } from 'src/events/event-publisher.service';
+import { TrackingService } from 'src/tracking/tracking.service';
 
 type DispatchJobPayload = AssignDriverJobDto | DispatchTimeoutJobDto;
 
@@ -54,6 +55,7 @@ export class DispatchService {
     private readonly redisService: RedisService,
     private readonly configService: ConfigService,
     private readonly eventPublisher: EventPublisherService,
+    private readonly trackingService: TrackingService,
   ) {
     this.maxDispatchAttempts = this.getPositiveIntFromEnv(
       'MAX_DISPATCH_ATTEMPTS',
@@ -140,77 +142,98 @@ export class DispatchService {
   }
 
   async handleDispatchTimeout(data: DispatchTimeoutJobDto): Promise<void> {
-    const timeoutResult = await this.dataSource.transaction(async (manager) => {
-      const lockedOrder = await manager
-        .getRepository(Order)
-        .createQueryBuilder('order')
-        .setLock('pessimistic_write')
-        .where('order.id = :orderId', { orderId: data.orderId })
-        .getOne();
+    type TimeoutResult =
+      | { action: 'skip' }
+      | { action: 'expired'; orderId: string }
+      | { action: 'redispatch'; orderId: string };
 
-      if (!lockedOrder) return { action: 'skip' as const };
-      if (this.terminalStatuses.has(lockedOrder.orderStatus)) {
-        return { action: 'skip' as const };
-      }
+    const timeoutResult = await this.dataSource.transaction<TimeoutResult>(
+      async (manager) => {
+        const lockedOrder = await manager
+          .getRepository(Order)
+          .createQueryBuilder('order')
+          .setLock('pessimistic_write')
+          .where('order.id = :orderId', { orderId: data.orderId })
+          .getOne();
 
-      // Idempotency guard: stale timeout after accept/status advance.
-      if (lockedOrder.orderStatus !== OrderStatus.DRIVER_ASSIGNED) {
-        return { action: 'skip' as const };
-      }
+        if (!lockedOrder) return { action: 'skip' };
+        if (this.terminalStatuses.has(lockedOrder.orderStatus)) {
+          return { action: 'skip' };
+        }
 
-      // Stale timeout for a previous assignment.
-      if (lockedOrder.assignedDriverId !== data.driverId) {
-        return { action: 'skip' as const };
-      }
+        // Idempotency guard: stale timeout after accept/status advance.
+        if (lockedOrder.orderStatus !== OrderStatus.DRIVER_ASSIGNED) {
+          return { action: 'skip' };
+        }
 
-      const previousStatus = lockedOrder.orderStatus;
-      lockedOrder.assignedDriverId = null;
-      lockedOrder.dispatchAttempts += 1;
-      lockedOrder.version += 1;
+        // Stale timeout for a previous assignment.
+        if (lockedOrder.assignedDriverId !== data.driverId) {
+          return { action: 'skip' };
+        }
 
-      if (lockedOrder.dispatchAttempts >= this.maxDispatchAttempts) {
-        lockedOrder.orderStatus = OrderStatus.EXPIRED;
+        const previousStatus = lockedOrder.orderStatus;
+        lockedOrder.assignedDriverId = null;
+        lockedOrder.dispatchAttempts += 1;
+        lockedOrder.version += 1;
+
+        if (lockedOrder.dispatchAttempts >= this.maxDispatchAttempts) {
+          lockedOrder.orderStatus = OrderStatus.EXPIRED;
+          await manager.save(Order, lockedOrder);
+
+          const expireHistory = manager.create(OrderStatusHistory, {
+            orderId: lockedOrder.id,
+            previousStatus,
+            newStatus: OrderStatus.EXPIRED,
+            actorId: 'system',
+          });
+          await manager.save(OrderStatusHistory, expireHistory);
+
+          return { action: 'expired', orderId: lockedOrder.id };
+        }
+
+        lockedOrder.orderStatus = OrderStatus.PENDING;
         await manager.save(Order, lockedOrder);
 
-        const expireHistory = manager.create(OrderStatusHistory, {
+        const pendingHistory = manager.create(OrderStatusHistory, {
           orderId: lockedOrder.id,
           previousStatus,
-          newStatus: OrderStatus.EXPIRED,
+          newStatus: OrderStatus.PENDING,
           actorId: 'system',
         });
-        await manager.save(OrderStatusHistory, expireHistory);
+        await manager.save(OrderStatusHistory, pendingHistory);
 
-        return { action: 'expired' as const, orderId: lockedOrder.id };
-      }
-
-      lockedOrder.orderStatus = OrderStatus.PENDING;
-      await manager.save(Order, lockedOrder);
-
-      const pendingHistory = manager.create(OrderStatusHistory, {
-        orderId: lockedOrder.id,
-        previousStatus,
-        newStatus: OrderStatus.PENDING,
-        actorId: 'system',
-      });
-      await manager.save(OrderStatusHistory, pendingHistory);
-
-      return { action: 'redispatch' as const, orderId: lockedOrder.id };
-    });
+        return { action: 'redispatch', orderId: lockedOrder.id };
+      },
+    );
 
     if (timeoutResult.action !== 'skip') {
       await this.redisService.del(DISPATCH_TIMEOUT_KEY(data.orderId));
     }
 
     if (timeoutResult.action === 'expired') {
+      // Cancel any ETA recalculation jobs for this order
+      try {
+        await this.trackingService.cancelEtaJob(timeoutResult.orderId);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to cancel ETA job for order ${timeoutResult.orderId}`,
+          err instanceof Error ? err.stack : undefined,
+        );
+      }
+
       // Intentional fire-and-forget for notification side-effect.
       this.eventPublisher.notifyCustomerStatusChanged(
         timeoutResult.orderId,
         OrderStatus.EXPIRED,
       );
+      // Notify the driver whose window expired so client can dismiss UI
+      this.eventPublisher.notifyDriverTimeout(data.orderId, data.driverId);
       return;
     }
 
     if (timeoutResult.action === 'redispatch') {
+      // Notify the driver whose accept window expired
+      this.eventPublisher.notifyDriverTimeout(data.orderId, data.driverId);
       await this.triggerDispatch(timeoutResult.orderId);
     }
   }
@@ -219,50 +242,56 @@ export class DispatchService {
     orderId: string,
     driverId: string,
   ): Promise<{ message: string }> {
-    const result = await this.dataSource.transaction(async (manager) => {
-      const lockedOrder = await manager
-        .getRepository(Order)
-        .createQueryBuilder('order')
-        .setLock('pessimistic_write')
-        .where('order.id = :orderId', { orderId })
-        .getOne();
+    type AcceptResult =
+      | { action: 'already-accepted' }
+      | { action: 'accepted'; orderId: string };
 
-      if (!lockedOrder) {
-        throw new NotFoundException('Order not found');
-      }
+    const result = await this.dataSource.transaction<AcceptResult>(
+      async (manager) => {
+        const lockedOrder = await manager
+          .getRepository(Order)
+          .createQueryBuilder('order')
+          .setLock('pessimistic_write')
+          .where('order.id = :orderId', { orderId })
+          .getOne();
 
-      if (lockedOrder.orderStatus === OrderStatus.DRIVER_ARRIVING) {
-        if (lockedOrder.assignedDriverId === driverId) {
-          return { action: 'already-accepted' as const };
+        if (!lockedOrder) {
+          throw new NotFoundException('Order not found');
         }
-      }
 
-      if (lockedOrder.orderStatus !== OrderStatus.DRIVER_ASSIGNED) {
-        throw new ConflictException(
-          'Order is no longer awaiting driver response',
-        );
-      }
+        if (lockedOrder.orderStatus === OrderStatus.DRIVER_ARRIVING) {
+          if (lockedOrder.assignedDriverId === driverId) {
+            return { action: 'already-accepted' };
+          }
+        }
 
-      if (lockedOrder.assignedDriverId !== driverId) {
-        throw new ForbiddenException('You are not assigned to this order');
-      }
+        if (lockedOrder.orderStatus !== OrderStatus.DRIVER_ASSIGNED) {
+          throw new ConflictException(
+            'Order is no longer awaiting driver response',
+          );
+        }
 
-      const previousStatus = lockedOrder.orderStatus;
-      lockedOrder.orderStatus = OrderStatus.DRIVER_ARRIVING;
-      lockedOrder.version += 1;
+        if (lockedOrder.assignedDriverId !== driverId) {
+          throw new ForbiddenException('You are not assigned to this order');
+        }
 
-      await manager.save(Order, lockedOrder);
+        const previousStatus = lockedOrder.orderStatus;
+        lockedOrder.orderStatus = OrderStatus.DRIVER_ARRIVING;
+        lockedOrder.version += 1;
 
-      const history = manager.create(OrderStatusHistory, {
-        orderId: lockedOrder.id,
-        previousStatus,
-        newStatus: OrderStatus.DRIVER_ARRIVING,
-        actorId: driverId,
-      });
-      await manager.save(OrderStatusHistory, history);
+        await manager.save(Order, lockedOrder);
 
-      return { action: 'accepted' as const, orderId: lockedOrder.id };
-    });
+        const history = manager.create(OrderStatusHistory, {
+          orderId: lockedOrder.id,
+          previousStatus,
+          newStatus: OrderStatus.DRIVER_ARRIVING,
+          actorId: driverId,
+        });
+        await manager.save(OrderStatusHistory, history);
+
+        return { action: 'accepted', orderId: lockedOrder.id };
+      },
+    );
 
     if (result.action === 'accepted') {
       await this.cancelDispatchTimeout(orderId);
@@ -270,6 +299,11 @@ export class DispatchService {
       this.eventPublisher.notifyCustomerStatusChanged(
         result.orderId,
         OrderStatus.DRIVER_ARRIVING,
+      );
+      // Schedule ETA recalculation for this order
+      await this.trackingService.ensureEtaJobScheduled(
+        result.orderId,
+        driverId,
       );
       return { message: 'Dispatch accepted successfully' };
     }
@@ -281,75 +315,90 @@ export class DispatchService {
     orderId: string,
     driverId: string,
   ): Promise<{ message: string }> {
-    const result = await this.dataSource.transaction(async (manager) => {
-      const lockedOrder = await manager
-        .getRepository(Order)
-        .createQueryBuilder('order')
-        .setLock('pessimistic_write')
-        .where('order.id = :orderId', { orderId })
-        .getOne();
+    type RejectResult =
+      | { action: 'already-handled' }
+      | { action: 'expired'; orderId: string }
+      | { action: 'redispatch'; orderId: string };
 
-      if (!lockedOrder) {
-        throw new NotFoundException('Order not found');
-      }
+    const result = await this.dataSource.transaction<RejectResult>(
+      async (manager) => {
+        const lockedOrder = await manager
+          .getRepository(Order)
+          .createQueryBuilder('order')
+          .setLock('pessimistic_write')
+          .where('order.id = :orderId', { orderId })
+          .getOne();
 
-      if (
-        lockedOrder.orderStatus === OrderStatus.PENDING ||
-        lockedOrder.orderStatus === OrderStatus.EXPIRED
-      ) {
-        return { action: 'already-handled' as const };
-      }
+        if (!lockedOrder) {
+          throw new NotFoundException('Order not found');
+        }
 
-      if (lockedOrder.orderStatus !== OrderStatus.DRIVER_ASSIGNED) {
-        throw new ConflictException(
-          'Order is no longer awaiting driver response',
-        );
-      }
+        if (
+          lockedOrder.orderStatus === OrderStatus.PENDING ||
+          lockedOrder.orderStatus === OrderStatus.EXPIRED
+        ) {
+          return { action: 'already-handled' };
+        }
 
-      if (lockedOrder.assignedDriverId !== driverId) {
-        throw new ForbiddenException('You are not assigned to this order');
-      }
+        if (lockedOrder.orderStatus !== OrderStatus.DRIVER_ASSIGNED) {
+          throw new ConflictException(
+            'Order is no longer awaiting driver response',
+          );
+        }
 
-      const previousStatus = lockedOrder.orderStatus;
-      lockedOrder.assignedDriverId = null;
-      lockedOrder.dispatchAttempts += 1;
-      lockedOrder.version += 1;
-      lockedOrder.attemptedDriverIds = [
-        ...(lockedOrder.attemptedDriverIds ?? []),
-        driverId,
-      ];
+        if (lockedOrder.assignedDriverId !== driverId) {
+          throw new ForbiddenException('You are not assigned to this order');
+        }
 
-      if (lockedOrder.dispatchAttempts >= this.maxDispatchAttempts) {
-        lockedOrder.orderStatus = OrderStatus.EXPIRED;
+        const previousStatus = lockedOrder.orderStatus;
+        lockedOrder.assignedDriverId = null;
+        lockedOrder.dispatchAttempts += 1;
+        lockedOrder.version += 1;
+        lockedOrder.attemptedDriverIds = [
+          ...(lockedOrder.attemptedDriverIds ?? []),
+          driverId,
+        ];
+
+        if (lockedOrder.dispatchAttempts >= this.maxDispatchAttempts) {
+          lockedOrder.orderStatus = OrderStatus.EXPIRED;
+          await manager.save(Order, lockedOrder);
+
+          const expireHistory = manager.create(OrderStatusHistory, {
+            orderId: lockedOrder.id,
+            previousStatus,
+            newStatus: OrderStatus.EXPIRED,
+            actorId: driverId,
+          });
+          await manager.save(OrderStatusHistory, expireHistory);
+
+          return { action: 'expired', orderId: lockedOrder.id };
+        }
+
+        lockedOrder.orderStatus = OrderStatus.PENDING;
         await manager.save(Order, lockedOrder);
 
-        const expireHistory = manager.create(OrderStatusHistory, {
+        const pendingHistory = manager.create(OrderStatusHistory, {
           orderId: lockedOrder.id,
           previousStatus,
-          newStatus: OrderStatus.EXPIRED,
+          newStatus: OrderStatus.PENDING,
           actorId: driverId,
         });
-        await manager.save(OrderStatusHistory, expireHistory);
+        await manager.save(OrderStatusHistory, pendingHistory);
 
-        return { action: 'expired' as const, orderId: lockedOrder.id };
-      }
-
-      lockedOrder.orderStatus = OrderStatus.PENDING;
-      await manager.save(Order, lockedOrder);
-
-      const pendingHistory = manager.create(OrderStatusHistory, {
-        orderId: lockedOrder.id,
-        previousStatus,
-        newStatus: OrderStatus.PENDING,
-        actorId: driverId,
-      });
-      await manager.save(OrderStatusHistory, pendingHistory);
-
-      return { action: 'redispatch' as const, orderId: lockedOrder.id };
-    });
+        return { action: 'redispatch', orderId: lockedOrder.id };
+      },
+    );
 
     if (result.action === 'expired') {
       await this.cancelDispatchTimeout(orderId);
+      try {
+        await this.trackingService.cancelEtaJob(result.orderId);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to cancel ETA job for order ${result.orderId}`,
+          err instanceof Error ? err.stack : undefined,
+        );
+      }
       // Intentional fire-and-forget for notification side-effect.
       this.eventPublisher.notifyCustomerStatusChanged(
         result.orderId,
@@ -472,7 +521,6 @@ export class DispatchService {
         lockedOrder.orderStatus = OrderStatus.DRIVER_ASSIGNED;
         lockedOrder.dispatchAttempts += 1;
         lockedOrder.version += 1;
-        // No explicit cap needed: growth is naturally bounded by dispatch attempts.
         lockedOrder.attemptedDriverIds = [
           ...attemptedDriverIds,
           lockedDriver.id,
@@ -526,6 +574,14 @@ export class DispatchService {
       });
       await manager.save(OrderStatusHistory, history);
     });
+    try {
+      await this.trackingService.cancelEtaJob(orderId);
+    } catch (err) {
+      this.logger.warn(
+        `Failed to cancel ETA job for order ${orderId}`,
+        err instanceof Error ? err.stack : undefined,
+      );
+    }
   }
 
   private getPositiveIntFromEnv(variable: string, fallback: number): number {
