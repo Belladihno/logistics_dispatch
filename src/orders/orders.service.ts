@@ -23,6 +23,7 @@ import { UserRole } from 'src/users/enums/user-role.enum';
 import { ORDER_TRANSITIONS } from './constants/order-transitions.contant';
 import { OutboxEvent } from 'src/outbox/entities/outbox-event.entity';
 import { OutboxStatus } from 'src/outbox/enums/outbox-status.enum';
+import { DispatchService } from 'src/dispatch/dispatch.service';
 import { RedisService } from 'src/redis/redis.service';
 import {
   IDEMPOTENCY_KEY_TTL_SECONDS,
@@ -39,6 +40,7 @@ export class OrdersService {
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
     private readonly trackingService: TrackingService,
     private readonly redisService: RedisService,
+    private readonly dispatchService: DispatchService,
   ) {}
 
   async createOrder(
@@ -443,5 +445,60 @@ export class OrdersService {
     } catch {
       throw new UnprocessableEntityException('Invalid pagination cursor');
     }
+  }
+
+  async reassignOrder(orderId: string, user: JwtUser): Promise<OrderResponse> {
+    const order = await this.orderRepo.findOneBy({ id: orderId });
+    if (!order) throw new NotFoundException('Order not found');
+
+    if (
+      ![OrderStatus.PENDING, OrderStatus.EXPIRED].includes(order.orderStatus)
+    ) {
+      throw new UnprocessableEntityException(
+        `Order must be in PENDING or EXPIRED to be reassigned; current status: ${order.orderStatus}`,
+      );
+    }
+
+    let updatedOrder = order;
+
+    if (order.orderStatus === OrderStatus.EXPIRED) {
+      updatedOrder = await this.dataSource.transaction<Order>(
+        async (manager): Promise<Order> => {
+          await manager
+            .createQueryBuilder()
+            .update(Order)
+            .set({
+              orderStatus: OrderStatus.PENDING,
+              assignedDriverId: null,
+              dispatchAttempts: 0,
+              attemptedDriverIds: [],
+              version: order.version + 1,
+            })
+            .where('id = :orderId AND version = :version', {
+              orderId,
+              version: order.version,
+            })
+            .execute();
+
+          const history = manager.create(OrderStatusHistory, {
+            orderId,
+            previousStatus: OrderStatus.EXPIRED,
+            newStatus: OrderStatus.PENDING,
+            actorId: user.userId,
+          });
+
+          await manager.save(OrderStatusHistory, history);
+
+          const updated = await manager.findOneBy(Order, { id: orderId });
+          if (!updated) throw new NotFoundException('Order not found');
+          return updated;
+        },
+      );
+    }
+
+    // Trigger dispatch attempt (fire-and-forget)
+    await this.dispatchService.triggerDispatch(orderId);
+
+    return toOrderResponse(updatedOrder);
   }
 }

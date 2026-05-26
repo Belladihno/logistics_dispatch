@@ -78,6 +78,15 @@ export class OrdersController {
     return this.ordersService.updateStatus(orderId, dto.status, user);
   }
 
+  @Patch(':id/reassign')
+  @Roles(UserRole.ADMIN)
+  reassignOrder(
+    @Param('id', ParseUUIDPipe) orderId: string,
+    @CurrentUser() user: JwtUser,
+  ) {
+    return this.ordersService.reassignOrder(orderId, user);
+  }
+
   @Patch(':id/cancel')
   @Roles(UserRole.CUSTOMER, UserRole.ADMIN)
   cancelOrder(
