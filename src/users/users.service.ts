@@ -9,7 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
 import { DataSource, Repository } from 'typeorm';
 import { toUserResponse } from './mappers/user.mapper';
-import { UserResponse } from './interfaces/user-response.interface';
+import type { UserResponse } from './interfaces/user-response.interface';
 import { PromoteToDriverDto } from './dto/promote-to-driver.dto';
 import { UserRole } from './enums/user-role.enum';
 import { Driver } from 'src/drivers/entities/driver.entity';
@@ -29,6 +29,39 @@ export class UsersService {
 
   async findById(id: string): Promise<User | null> {
     return this.userRepo.findOneBy({ id });
+  }
+
+  async findAll(
+    limit: number,
+    cursor?: string,
+  ): Promise<{ data: UserResponse[]; nextCursor: string | null }> {
+    const query = this.userRepo
+      .createQueryBuilder('user')
+      .orderBy('user.createdAt', 'DESC')
+      .addOrderBy('user.id', 'DESC')
+      .take(limit + 1);
+
+    if (cursor) {
+      const cursorBuffer = Buffer.from(cursor, 'base64url').toString('utf-8');
+      const [cursorCreatedAt, cursorId] = cursorBuffer.split('_');
+      query.where(
+        '(user.createdAt < :cursorCreatedAt OR (user.createdAt = :cursorCreatedAt AND user.id < :cursorId))',
+        { cursorCreatedAt, cursorId },
+      );
+    }
+
+    const users = await query.getMany();
+
+    const hasMore = users.length > limit;
+    if (hasMore) users.pop();
+
+    const nextCursor = hasMore
+      ? Buffer.from(
+          `${users[users.length - 1].createdAt.toISOString()}_${users[users.length - 1].id}`,
+        ).toString('base64url')
+      : null;
+
+    return { data: users.map(toUserResponse), nextCursor };
   }
 
   async getUserProfile(id: string): Promise<UserResponse> {

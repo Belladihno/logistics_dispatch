@@ -21,6 +21,7 @@ import { ConfigService } from '@nestjs/config';
 import { MailService } from 'src/mail/mail.service';
 import { ResendVerificationEmailDto } from '../dto/resend-verification-email.dto';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { UsersService } from 'src/users/users.service';
 
 export interface AuthResponse {
@@ -324,6 +325,56 @@ export class AuthService {
     }
 
     return genericResponseMessage;
+  }
+
+  async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
+    const rawToken = dto.token?.trim();
+
+    if (!rawToken) {
+      throw new UnauthorizedException('Invalid reset token');
+    }
+
+    const [tokenOwnerUserId] = rawToken.split('.', 1);
+
+    if (!tokenOwnerUserId) {
+      throw new UnauthorizedException('Invalid reset token');
+    }
+
+    const user = await this.userRepo
+      .createQueryBuilder('user')
+      .addSelect('user.passwordResetTokenHash')
+      .addSelect('user.passwordHash')
+      .where('user.id = :id', { id: tokenOwnerUserId })
+      .getOne();
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid reset token');
+    }
+
+    if (!user.passwordResetTokenHash || !user.passwordResetExpiresAt) {
+      throw new UnauthorizedException('Invalid reset token');
+    }
+
+    if (user.passwordResetExpiresAt.getTime() < Date.now()) {
+      throw new UnauthorizedException('Reset token has expired');
+    }
+
+    const tokenIsValid = await verifyHash(
+      user.passwordResetTokenHash,
+      rawToken,
+    );
+
+    if (!tokenIsValid) {
+      throw new UnauthorizedException('Invalid reset token');
+    }
+
+    user.passwordHash = await Hash(dto.password);
+    user.passwordResetTokenHash = null;
+    user.passwordResetExpiresAt = null;
+
+    await this.userRepo.save(user);
+
+    return { message: 'Password reset successfully' };
   }
 
   private async createEmailVerificationToken(user: User): Promise<string> {

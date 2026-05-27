@@ -15,6 +15,7 @@ import type { GoogleAuthUser } from '../strategy/google.strategy';
 import { VerifyEmailDto } from '../dto/verify-email.dto';
 import { ResendVerificationEmailDto } from '../dto/resend-verification-email.dto';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags } from '@nestjs/swagger';
 import { throttleConfig } from 'src/common/throttler/throttle.config';
@@ -27,6 +28,7 @@ import {
   ApiAuthRefreshDocs,
   ApiAuthRegisterDocs,
   ApiAuthResendVerificationEmailDocs,
+  ApiAuthResetPasswordDocs,
   ApiAuthVerifyEmailDocs,
   ApiAuthVerifyEmailFromLinkDocs,
 } from '../docs/decorators/auth-swagger.decorators';
@@ -105,6 +107,13 @@ export class AuthController {
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     const message = await this.authService.forgotPassword(dto);
     return { message };
+  }
+
+  @Public()
+  @Post('reset-password')
+  @ApiAuthResetPasswordDocs()
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 
   @Public()

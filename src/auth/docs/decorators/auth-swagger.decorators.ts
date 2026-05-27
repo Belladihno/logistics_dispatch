@@ -15,6 +15,7 @@ import { LoginDto } from '../../dto/login.dto';
 import { VerifyEmailDto } from '../../dto/verify-email.dto';
 import { ResendVerificationEmailDto } from '../../dto/resend-verification-email.dto';
 import { ForgotPasswordDto } from '../../dto/forgot-password.dto';
+import { ResetPasswordDto } from '../../dto/reset-password.dto';
 import {
   AuthResponseDto,
   MessageResponseDto,
@@ -159,6 +160,19 @@ export const ApiAuthRefreshDocs = () =>
     }),
     ApiTooManyRequestsResponse({
       description: 'Too many refresh attempts. Please try again later.',
+    }),
+  );
+
+export const ApiAuthResetPasswordDocs = () =>
+  applyDecorators(
+    ApiOperation({ summary: 'Reset password using token from email' }),
+    ApiBody({ type: ResetPasswordDto }),
+    ApiOkResponse({
+      type: MessageResponseDto,
+      description: 'Password reset successfully',
+    }),
+    ApiUnauthorizedResponse({
+      description: 'Invalid, missing, or expired reset token',
     }),
   );
 
