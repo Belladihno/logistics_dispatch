@@ -9,6 +9,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.setGlobalPrefix('api/v1');
   // Register WebSocket adapter (Socket.IO) early so gateways initialize
   // with the correct adapter during module bootstrap.
   app.useWebSocketAdapter(new IoAdapter(app));
@@ -57,7 +58,7 @@ async function bootstrap() {
 
   if (swaggerEnabled) {
     const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-    SwaggerModule.setup('docs', app, swaggerDocument, {
+    SwaggerModule.setup('api/v1/docs', app, swaggerDocument, {
       swaggerOptions: {
         persistAuthorization: false,
       },
